@@ -22,20 +22,12 @@ def main():
     #dirval = db_parameters[case]["dirval"]
     #dirinput = db_parameters[case]["dirinput"]
 
-    #counter = 0
-    #if dotraining is True:
-    #    counter = counter + checkdir(dirmodel)
-    #if dotesting is True:
-    #    counter = counter + checkdir(dirval)
-    #if counter < 0:
-    #    sys.exit()
-
-    myopt = DnnOptimiser(db_parameters[case], case)
-
-    #if dotraining is True:
-    #    checkmakedir(dirmodel)
-    #if dotesting is True:
-    #    checkmakedir(dirval)
+    dodumpflattree = default["dumpflattree"]
+    dotrain = default["dotrain"]
+    doapply = default["doapply"]
+    doplot = default["doplot"]
+    dogrid = default["dogrid"]
+    dobayes = default["dobayes"]
 
     if len(db_parameters[case]["train_events"]) != len(db_parameters[case]["test_events"]) or \
        len(db_parameters[case]["train_events"]) != len(db_parameters[case]["apply_events"]):
@@ -79,3 +71,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+=======
+    if dodumpflattree is True:
+        myopt.dumpflattree()
+    if dotrain is True:
+        myopt.train()
+    if doapply is True:
+        myopt.apply()
+    if doplot is True:
+        myopt.plot()
+    if dogrid is True:
+        myopt.gridsearch()
+    if dobayes is True:
+        myopt.optimise()
+
+do_entire_analysis()
+>>>>>>> First draft of Bayesian optimisation
