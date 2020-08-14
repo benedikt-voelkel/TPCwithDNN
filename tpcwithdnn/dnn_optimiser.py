@@ -2,21 +2,33 @@
 # pylint: disable=missing-module-docstring, missing-function-docstring, missing-class-docstring
 import os
 from array import array
+
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
 from keras.optimizers import Adam
 from keras.models import model_from_json
 from keras.utils.vis_utils import plot_model
+
 from root_numpy import fill_hist
+
 from ROOT import TH1F, TH2F, TFile, TCanvas, TLegend, TPaveText, gPad # pylint: disable=import-error, no-name-in-module
 from ROOT import gStyle, kWhite, kBlue, kGreen, kRed, kCyan, kOrange, kMagenta # pylint: disable=import-error, no-name-in-module
 from ROOT import gROOT, TTree  # pylint: disable=import-error, no-name-in-module
+
+# For Bayesian optimization
+from mlbot.config import Config
+from mlbot.optimization import Optimizer
+
 from symmetry_padding_3d import SymmetryPadding3d
 from machine_learning_hep.logger import get_logger
 from fluctuation_data_generator import FluctuationDataGenerator
 from utilities_dnn import u_net
 from data_loader import load_train_apply, load_data_original, get_event_mean_indices
+from dnn_config import make_model_config, make_opt_space
+from model.model import construct_model, fit_model, bayesian_trial
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 matplotlib.use("Agg")
@@ -254,6 +266,45 @@ class DnnOptimiser:
             json_file.write(model_json)
         model.save_weights("%s/model_%s_nEv%d.h5" % (self.dirmodel, self.suffix, self.total_events))
         self.logger.info("Saved trained model to disk")
+    
+    
+    def model_config(self):
+        return make_model_config(self.grid_phi, self.grid_r, self.grid_z, self.dim_input,
+                                 self.depth, self.batch_normalization, self.pooling,
+                                 self.filters, self.dropout,
+                                 self.lossfun, self.adamlr, self.epochs)
+
+
+    def bayesian_opt(self):
+
+        train_gen = FluctuationDataGenerator(self.partition["train"], data_dir=self.dirinput_train,
+                                             **self.params)
+        val_gen = FluctuationDataGenerator(self.partition["validation"],
+                                           data_dir=self.inputdir_test, **self.params)
+
+        # Prepare configuration for optimisation
+        config_dict = {"n_kfolds": 3,
+                       "n_trials": 3,
+                       "model_config": self.model_config(),
+                       "search_space": make_opt_space(),
+                       "construct_model": construct_model,
+                       "trial": bayesian_trial,
+                       "scoring": "mse",
+                       "metrics": {"mse": None},
+                       "lower_is_better": False,
+                       "x_train": train_gen}
+
+
+        config = Config(**config_dict)
+        # validation is needed for single trial, add as attachment to have it available
+        config.add_attachment("val_gen", val_gen)
+        opt = Optimizer(config)
+        res = opt.optimize()
+        
+        out_dir = "./optimisation_output"
+        res.save(out_dir)
+        res.plot(out_dir)
+
 
     # TODO: What is it for? To remove?
     def groupbyindices_input(self, arrayflat):

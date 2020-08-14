@@ -63,6 +63,8 @@ def main():
             myopt.plot()
         if default["dogrid"] is True:
             myopt.gridsearch()
+        if default["dobayes"] is True:
+            myopt.bayesian_opt()
 
     if default["doprofile"] is True:
         myopt.draw_profile(all_events_counts)
@@ -71,19 +73,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-=======
-    if dodumpflattree is True:
-        myopt.dumpflattree()
-    if dotrain is True:
-        myopt.train()
-    if doapply is True:
-        myopt.apply()
-    if doplot is True:
-        myopt.plot()
-    if dogrid is True:
-        myopt.gridsearch()
-    if dobayes is True:
-        myopt.optimize()
-
-do_entire_analysis()
->>>>>>> First draft of Bayesian optimisation
