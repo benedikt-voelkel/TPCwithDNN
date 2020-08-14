@@ -83,7 +83,7 @@ if __name__ == "__main__":
     if dogrid is True:
         myopt.gridsearch()
     if dobayes is True:
-        myopt.optimise()
+        myopt.optimize()
 
 do_entire_analysis()
 >>>>>>> First draft of Bayesian optimisation

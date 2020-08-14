@@ -2,13 +2,15 @@ import sys
 from os.path import exists, join, split
 from os import makedirs, getpid
 from copy import deepcopy
+
+from datetime import time
+
 from yaml.representer import RepresenterError
 from keras.models import model_from_json
 from keras.callbacks import ModelCheckpoint, EarlyStopping
+
 from machine_learning_hep.io import parse_yaml, dump_yaml_from_dict, dict_yamlable
 from machine_learning_hep.logger import get_logger
-from machine_learning_hep.do_variations import modify_dictionary
-from machine_learning_hep.optimisation.bayesian_opt import BayesianOpt
 
 
 # Common file names
@@ -34,7 +36,7 @@ def digest_model_config(model_config):
             digest_model_config(model_config[k])
 
 
-def compile_model(model, model_config):
+def compile_model(model, compile_config):
     """comile model
 
     Args:
@@ -43,7 +45,7 @@ def compile_model(model, model_config):
         model_config: dict
             dictionary with key "compile" hodling keyword args
     """
-    model.compile(**model_config["compile"])
+    model.compile(**compile_config)
     model.summary()
 
 
@@ -62,10 +64,10 @@ def construct_model(constructor, *args, **kwargs):
     """
 
     model_config = None
-    if len(args) == 1 and not kwargs and isinstance(args[0], dict):
+    if not args and not kwargs:
         # Assume it's a model_config dictionary
         get_logger().info("Construct model from config dictionary")
-        model_config = args[0]
+        model_config = constructor
 
     model_args = args
     model_kwargs = kwargs
@@ -73,8 +75,8 @@ def construct_model(constructor, *args, **kwargs):
         model_args = model_config.get("model_args", model_args)
         model_kwargs = model_config.get("model_kwargs", model_kwargs)
 
-    model = constructor(*model_args, **model_kwargs)
-    compile_model(model, model_config)
+    model = model_config["constructor"](*model_args, **model_kwargs)
+    compile_model(model, model_config.get("compile", {}))
     return model
 
 
@@ -227,75 +229,57 @@ def load_model(in_dir):
     return model, model_config
 
 
-class KerasBayesianOpt(BayesianOpt): # pylint: disable=too-many-instance-attributes
-    """custom Bayesian optimiser class
+def bayesian_trial(model, x_train, y_train, fit_params, config):
+    """One trial
+
+    This does one fit attempt (no CV at the moment) with the given parameters
+
     """
 
-    def __init__(self, model_config, space):
-        super().__init__(model_config, space)
+    # Check if scoring is in metrics list and add if not present
+    """
+    if config.scoring not in model_config["compile"]["metrics"]:
+        is_callable = False
+        for m in model_config["compile"]["metrics"]:
+            if callable(m) and m.__name__ == config.scoring:
+                # There is sometnig which is callable and has the name of the desired scoring, good
+                is_callable = True
+                break
+        if not is_callable:
+            # If it was not there as a callable, add the name from config and hope keras can handle
+            # that...
+            model_config["compile"]["metrics"].append(config.scoring)
+    """
+
+    time_stamp = time()
+
+    mode = "min" if config.lower_is_better else "max"
+    checkpoint_weights_path = f"/tmp/BayesianOpt_fit_{time}_{{epoch:02d}}-{{val_{config.scoring}:.4f}}"
+    checkpoint = ModelCheckpoint(filepath=checkpoint_weights_path,
+                                 save_weights_only=True,
+                                 monitor=f"val_{config.scoring}",
+                                 mode=mode,
+                                 save_best_only=True)
+
+    early_stopping = EarlyStopping(monitor=f"val_{config.scoring}",
+                                   patience=3,
+                                   mode=mode)
+    val_gen = config.get_attachment("val_gen")
+    history = fit_model(model, gen=x_train, val_data=val_gen, **fit_params, callbacks=[checkpoint, early_stopping])
 
 
-        # Number of trials
-        self.n_trials = 4
+    # Evaluate the model
+    predict_kwargs = {k: v for k, v in fit_params.items() if k in ["workers", "use_multiprocessing"]}
+    score_train = None
+    score_test = None
+    #test_data = self.test_data if self.test_data else self.val_gen
+    scores_train = model.evaluate(x_train, verbose=1, **predict_kwargs)
+    scores_test = model.evaluate(val_gen, verbose=1, **predict_kwargs)
+    for ln, lv_train, lv_test in zip(model.metrics_names, scores_train, scores_test):
+        if ln == config.scoring:
+            score_train = lv_train
+            score_test = lv_test
+            break
 
-        # In case a data generator is used
-        self.train_gen = None
-        self.val_gen = None
-
-        # Model construction function
-        self.construct_model_func = None
-        self.model_constructor = None
-
-
-    def trial_(self, space_drawn):
-        """One trial
-
-        This does one fit attempt (no CV at the moment) with the given parameters
-
-        """
-        model_config = deepcopy(self.model_config)
-        modify_dictionary(model_config, space_drawn, True)
-        # This is the full configuration to be returned
-        model_config_tmp = deepcopy(model_config)
-        digest_model_config(model_config)
-
-        # Check if scoring is in metrics list and add if not present
-        if self.scoring_opt not in model_config["compile"]["metrics"]:
-            model_config["compile"]["metrics"].append(self.scoring_opt)
-
-        model = self.construct_model_func(self.model_constructor, model_config)
-
-        mode = "min" if self.low_is_better else "max"
-        checkpoint_weights_path = f"/tmp/BayesianOpt_fit_{self.trial_id}_{{epoch:02d}}-{{val_{self.scoring_opt}:.4f}}"
-        checkpoint = ModelCheckpoint(filepath=checkpoint_weights_path,
-                                     save_weights_only=True,
-                                     monitor=f"val_{self.scoring_opt}",
-                                     mode=mode,
-                                     save_best_only=True)
-
-        early_stopping = EarlyStopping(monitor=f"val_{self.scoring_opt}",
-                                       patience=5,
-                                       mode=mode)
-        history = fit_model(model, gen=self.train_gen, val_data=self.val_gen, **model_config["fit"], callbacks=[checkpoint, early_stopping])
-
-        min_val = history.history[f"val_{self.scoring_opt}"][0]
-        corr_train = history.history[self.scoring_opt][0]
-        for train_sc, val_sc in zip(history.history[self.scoring_opt], history.history[f"val_{self.scoring_opt}"]):
-            if val_sc < min_val:
-                min_val = val_sc
-                corr_train = train_sc
-
-        res = {f"train_{self.scoring_opt}": [corr_train],
-               f"test_{self.scoring_opt}": [min_val]}
-
-        #model.load_weights(checkpoint_weights_path)
-
-        return res, model, model_config_tmp
-
-
-    def finalise(self):
-        print("Nothing to finalise...")
-
-
-    def save_model_(self, model, out_dir):
-        save_model(model, self.model_config, join(out_dir, "model"))
+    #model.load_weights(checkpoint_weights_path)
+    return config.make_results([score_train], [score_test])

@@ -16,8 +16,12 @@ from fluctuationDataGenerator import fluctuationDataGenerator
 from utilitiesdnn import UNet
 from dataloader import loadtrain_test, loaddata_original
 
+# For Bayesian optimization
+from mlbot.config import Config
+from mlbot.optimization import Optimizer
+
 from dnn_config import make_model_config, make_opt_space
-from model.model import construct_model, KerasBayesianOpt, fit_model
+from model.model import construct_model, fit_model, bayesian_trial
 
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -105,10 +109,29 @@ class DnnOptimiser:
         self.logger.info("(SCMean, SCFluctuations)=(%d, %d)"  % (self.opt_train[0],
                                                                  self.opt_train[1]))
 
+
+        # Loaded samples
         self.indexmatrix_ev_mean = []
-        for ievent in np.arange(self.maxrandomfiles):
-            for imean in np.arange(self.range_mean_index[0], self.range_mean_index[1] + 1):
-                self.indexmatrix_ev_mean.append([ievent, imean])
+
+        if self.data_param["shuffle_on_load"]:
+            # Shuffle data at loading time
+            random_files = np.arange(self.maxrandomfiles)
+            np.random.shuffle(random_files)
+            mean_files = np.arange(self.range_mean_index[0], self.range_mean_index[1] + 1)
+
+            for ievent in random_files:
+                np.random.shuffle(mean_files)
+                for imean in mean_files:
+                    self.indexmatrix_ev_mean.append([ievent, imean])
+
+            np.random.shuffle(self.indexmatrix_ev_mean)
+
+        else:
+            # Do that for reproducible training
+            self.indexmatrix_ev_mean = []
+            for ievent in np.arange(self.maxrandomfiles):
+                for imean in np.arange(self.range_mean_index[0], self.range_mean_index[1] + 1):
+                    self.indexmatrix_ev_mean.append([ievent, imean])
 
         self.indexmatrix_ev_mean_train = [self.indexmatrix_ev_mean[index] \
                 for index in range(self.rangeevent_train[0], self.rangeevent_train[1])]
@@ -211,30 +234,33 @@ class DnnOptimiser:
                                  self.lossfun, self.adamlr, self.epochs)
 
 
-    def optimise(self):
-        bayes_opt = KerasBayesianOpt(self.model_config(), make_opt_space())
-        bayes_opt.train_gen = fluctuationDataGenerator(self.indexmatrix_ev_mean_train,
-                                                       **self.params)
-        bayes_opt.val_gen = fluctuationDataGenerator(self.indexmatrix_ev_mean_test,
-                                                     **self.params)
-        bayes_opt.construct_model_func = construct_model
-        bayes_opt.model_constructor = UNet
+    def optimize(self):
 
-        # Scorings are actually taken into acount via model_config["compile"]["metrics"]
-        # But just set it here so BayesianOpt has everything it needs (hence, this is just
-        # a dummy seeting)
-        bayes_opt.scoring = {self.lossfun: None}
-        # This one however is actually monitored
-        bayes_opt.scoring_opt = self.lossfun
-        bayes_opt.n_trials = 5
+        train_gen = fluctuationDataGenerator(self.indexmatrix_ev_mean_train, **self.params)
+        val_gen = fluctuationDataGenerator(self.indexmatrix_ev_mean_test, **self.params)
 
-        bayes_opt.optimise()
+        # Prepare configuration for optimisation
+        config_dict = {"n_kfolds": 3,
+                       "n_trials": 3,
+                       "model_config": self.model_config(),
+                       "search_space": make_opt_space(),
+                       "construct_model": construct_model,
+                       "trial": bayesian_trial,
+                       "scoring": "mse",
+                       "metrics": {"mse": None},
+                       "lower_is_better": False,
+                       "x_train": train_gen}
 
+
+        config = Config(**config_dict)
+        # validation is needed for single trial, add as attachment to have it available
+        config.add_attachment("val_gen", val_gen)
+        opt = Optimizer(config)
+        res = opt.optimize()
+        
         out_dir = "./optimisation_output"
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
-        bayes_opt.save(out_dir, best_only=False)
-        bayes_opt.plot(out_dir)
+        res.save(out_dir)
+        res.plot(out_dir)
 
 
     def train(self):

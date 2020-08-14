@@ -33,3 +33,4 @@ DNN_fluctuations:
   lossfun: mse
   metrics: mse
   adamlr: 0.001000
+  shuffle_on_load: True
