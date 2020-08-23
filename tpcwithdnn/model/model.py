@@ -3,7 +3,8 @@ from os.path import exists, join, split
 from os import makedirs, getpid
 from copy import deepcopy
 
-from datetime import time
+from datetime import datetime
+from time import sleep
 
 from yaml.representer import RepresenterError
 from keras.models import model_from_json
@@ -251,22 +252,30 @@ def bayesian_trial(model, x_train, y_train, fit_params, config):
             model_config["compile"]["metrics"].append(config.scoring)
     """
 
-    time_stamp = time()
+    time_stamp = datetime.timestamp(datetime.now())
 
     mode = "min" if config.lower_is_better else "max"
-    checkpoint_weights_path = f"/tmp/BayesianOpt_fit_{time}_{{epoch:02d}}-{{val_{config.scoring}:.4f}}"
+    checkpoint_weights_path = f"./BayesianOpt_fit_{time_stamp}_{{epoch:03d}}-val_{config.scoring}"
     checkpoint = ModelCheckpoint(filepath=checkpoint_weights_path,
                                  save_weights_only=True,
                                  monitor=f"val_{config.scoring}",
-                                 mode=mode,
-                                 save_best_only=True)
+                                 save_best_only=True,
+                                 mode=mode)
 
-    early_stopping = EarlyStopping(monitor=f"val_{config.scoring}",
-                                   patience=3,
-                                   mode=mode)
+    #early_stopping = EarlyStopping(monitor=f"val_{config.scoring}",
+    #                               patience=3,
+    #                               mode=mode)
     val_gen = config.get_attachment("val_gen")
-    history = fit_model(model, gen=x_train, val_data=val_gen, **fit_params, callbacks=[checkpoint, early_stopping])
+    history = fit_model(model, gen=x_train, val_data=val_gen, **fit_params, callbacks=[checkpoint]) #, early_stopping])
+    # Find best val score
+    # Have to do it in more cumbersome way because in multiprocessing save file might be locked so
+    # it doesn't work to have the same filename for all epochs
+    extract_index_func = min if config.lower_is_better else max
+    best_epoch = history.history[f"val_{config.scoring}"].index(extract_index_func(history.history[f"val_{config.scoring}"])) + 1
 
+    weights_path = f"./BayesianOpt_fit_{time_stamp}_{best_epoch:03d}-val_{config.scoring}"
+    sleep(5)
+    model.load_weights(weights_path)
 
     # Evaluate the model
     predict_kwargs = {k: v for k, v in fit_params.items() if k in ["workers", "use_multiprocessing"]}

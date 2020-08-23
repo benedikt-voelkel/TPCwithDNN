@@ -30,18 +30,19 @@ def make_model_config(grid_phi, grid_r, grid_z, dim_input,
             "compile": {"loss": "mse",
                         "optimizer": {"callable__": Adam, "kwargs": {"lr": learning_rate}},
                         "metrics": [loss, dice_loss]},
-            "fit": {"workers": 20,
+            "fit": {"workers": 40,
                     "use_multiprocessing": True,
                     "epochs": epochs}}
 
 
 def make_opt_space():
     return {"compile": 
-            {"optimizer": {"kwargs": {"lr": hp.uniform("m_learning_rate", 0.0005, 0.01)}},
-             "loss": hp.choice("m_loss", ["mse", "mean_squared_logarithmic_error"])},
-             "model_kwargs": {"batchnorm": hp.choice("m_bathnorm", [0, 1]),
+            {"optimizer": {"kwargs": {"lr": hp.uniform("m_learning_rate", 0.0001, 0.01)}}},
+             #"loss": hp.choice("m_loss", ["mse", "mean_squared_logarithmic_error"])},
+             "model_kwargs": {"batchnorm": hp.choice("m_batchnorm", [0, 1]),
                               "dropout": hp.uniform("m_dropout", 0., 0.5),
-                              "inc_rate": scope.int(hp.quniform("m_inc_rate", 1, 4, 1)),
+                              "inc_rate": hp.uniform("m_inc_rate", 1, 4),
                               "start_channels": scope.int(hp.quniform("m_start_channels", 2, 8, 1)),
                               "depth": scope.int(hp.quniform("m_depth", 2, 4, 1))},
-             "fit": {"epochs": scope.int(hp.quniform("m_epochs", 2, 4, 1))}}
+             "fit": {"epochs": scope.int(hp.quniform("m_epochs", 20, 30, 1))}}
+             #"fit": {}}

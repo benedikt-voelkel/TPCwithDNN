@@ -280,18 +280,18 @@ class DnnOptimiser:
         train_gen = FluctuationDataGenerator(self.partition["train"], data_dir=self.dirinput_train,
                                              **self.params)
         val_gen = FluctuationDataGenerator(self.partition["validation"],
-                                           data_dir=self.inputdir_test, **self.params)
+                                           data_dir=self.dirinput_test, **self.params)
 
         # Prepare configuration for optimisation
         config_dict = {"n_kfolds": 3,
-                       "n_trials": 3,
+                       "n_trials": 50,
                        "model_config": self.model_config(),
                        "search_space": make_opt_space(),
                        "construct_model": construct_model,
                        "trial": bayesian_trial,
                        "scoring": "mse",
                        "metrics": {"mse": None},
-                       "lower_is_better": False,
+                       "lower_is_better": True,
                        "x_train": train_gen}
 
 
@@ -301,7 +301,7 @@ class DnnOptimiser:
         opt = Optimizer(config)
         res = opt.optimize()
         
-        out_dir = "./optimisation_output"
+        out_dir = f"./optimisation_output_Ev{self.total_events}"
         res.save(out_dir)
         res.plot(out_dir)
 
